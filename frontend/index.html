@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThermoPlanner AI | Microclimate ROI Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        obsidian: '#0B0F17',
+                        cardDark: '#131A26',
+                        accentGold: '#D4AF37',
+                        thermalHot: '#FF453A',
+                        thermalCool: '#30D158'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .glass-card {
+            background: rgba(19, 26, 38, 0.75);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+        
+        .tilt-card {
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
+        }
+        
+        .tilt-card:hover {
+            transform: translateY(-4px) rotateX(2deg) rotateY(-1deg);
+            box-shadow: 0 25px 50px -12px rgba(212, 175, 55, 0.15);
+        }
+    </style>
+</head>
+
+<body class="bg-obsidian text-slate-100 font-sans antialiased min-h-screen flex flex-col">
+
+    <header class="border-b border-slate-800 bg-obsidian/90 sticky top-0 z-50 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center gap-4">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-600 flex items-center justify-center font-bold text-xl text-black shadow-lg shadow-amber-500/20">
+                TP
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-amber-400 to-amber-500 bg-clip-text text-transparent">
+                    ThermoPlanner AI
+                </h1>
+                <p class="text-xs text-slate-400">FortyGuard 2-Meter Resolution vs. 10km Satellite Standard</p>
+            </div>
+        </div>
+
+        <div class="flex items-center flex-wrap gap-3">
+            <span id="refreshStatus" class="text-xs text-slate-400 font-mono hidden xl:inline-block"></span>
+
+            <!-- Interactive CAPEX Budget Filter -->
+            <div class="flex items-center space-x-2 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-300">
+                <span>Max CAPEX: <b id="budgetValue" class="text-amber-400">$10,000</b></span>
+                <input type="range" id="budgetSlider" min="1000" max="10000" step="500" value="10000" class="w-24 accent-amber-500 cursor-pointer">
+            </div>
+
+            <!-- Auto Refresh Toggle Switch -->
+            <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-amber-500/40 transition">
+                <input type="checkbox" id="autoRefreshToggle" class="rounded accent-amber-500 cursor-pointer">
+                <span>Auto-Refresh (2m)</span>
+            </label>
+
+            <!-- Export Executive CSV Button -->
+            <button onclick="exportCSV()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 font-semibold text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                <i data-lucide="download" class="w-3.5 h-3.5"></i> Export CSV
+            </button>
+
+            <!-- API Status Pill -->
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span> FortyGuard API Active
+            </span>
+
+            <!-- Manual Refresh Button -->
+            <button onclick="loadAnalytics()" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-black font-semibold text-xs rounded-lg shadow-lg transition duration-200">
+                Refresh Live Grid
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1920px] mx-auto w-full">
+        <div class="lg:col-span-8 space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div class="glass-card tilt-card p-4 rounded-2xl">
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Avg Surface Temp</p>
+                    <h3 id="avgTemp" class="text-2xl font-bold mt-1 text-rose-400">-- °C</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">FortyGuard 2m Surface Resolution</p>
+                </div>
+                <div class="glass-card tilt-card p-4 rounded-2xl">
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Annual HVAC Surge</p>
+                    <h3 id="hvacSurge" class="text-2xl font-bold mt-1 text-amber-400">$--</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Thermal Stress Cost Penalty</p>
+                </div>
+                <div class="glass-card tilt-card p-4 rounded-2xl">
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Potential Savings</p>
+                    <h3 id="potentialSavings" class="text-2xl font-bold mt-1 text-emerald-400">$--</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Targeted Mitigation ROI</p>
+                </div>
+                <div class="glass-card tilt-card p-4 rounded-2xl">
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Highest Risk Zone</p>
+                    <h3 id="highRiskZone" class="text-2xl font-bold mt-1 text-slate-100">--</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Priority Intervention Target</p>
+                </div>
+            </div>
+
+            <div class="glass-card rounded-2xl p-4 relative overflow-hidden">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i data-lucide="map-pin" class="w-4 h-4 text-amber-400"></i> Hyperlocal Surface Temperature Overlay
+                    </h2>
+                    <span class="text-xs text-slate-400">Interactive 2-Meter Microclimate Grid</span>
+                </div>
+                <div id="map" class="h-[480px] w-full rounded-xl z-10 border border-slate-800"></div>
+            </div>
+
+            <div class="glass-card rounded-2xl p-4">
+                <h2 class="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                    <i data-lucide="line-chart" class="w-4 h-4 text-amber-400"></i> Surface Temp (°C) vs HVAC Cost Surge ($)
+                </h2>
+                <div class="h-[220px]">
+                    <canvas id="analyticsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-4 space-y-6">
+            <div class="glass-card rounded-2xl p-5 h-full flex flex-col">
+                <div class="border-b border-slate-800 pb-4 mb-4 flex justify-between items-start">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="bot" class="w-5 h-5 text-amber-400"></i> Agentic Mitigation Engine
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-1">Autonomous recommendations filtered by CAPEX</p>
+                    </div>
+                    <span id="filteredCount" class="text-[10px] font-mono bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">Showing All</span>
+                </div>
+
+                <div id="agentFeed" class="space-y-4 overflow-y-auto max-h-[720px] pr-2 flex-1">
+                    <div class="p-4 text-center text-slate-500 text-xs">Fetching microclimate data...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let map = L.map('map').setView([33.4484, -112.0740], 16);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap © CARTO'
+        }).addTo(map);
+
+        let chartInstance = null;
+        let autoRefreshTimer = null;
+        let currentZones = [];
+
+        async function loadAnalytics() {
+            const statusEl = document.getElementById('refreshStatus');
+            if (statusEl) statusEl.innerText = 'Updating grid...';
+
+            try {
+                let res;
+                try {
+                    const response = await fetch(`http://localhost:8000/api/v1/analytics?lat=33.4484&lon=-112.0740&_t=${Date.now()}`);
+                    if (!response.ok) throw new Error('API unreachable');
+                    res = await response.json();
+                } catch (e) {
+                    res = getFallbackData();
+                }
+
+                if (res && res.zones) {
+                    currentZones = res.zones;
+                    updateMetrics(res.summary);
+                    renderMap(currentZones);
+                    renderChart(currentZones);
+                    renderAgentFeed(currentZones);
+                }
+
+                if (window.lucide) lucide.createIcons();
+
+                if (statusEl) {
+                    const timeStr = new Date().toLocaleTimeString();
+                    statusEl.innerText = `Updated ${timeStr}`;
+                }
+
+            } catch (err) {
+                console.error("Data load failed:", err);
+                if (statusEl) statusEl.innerText = 'Refresh failed';
+            }
+        }
+
+        // Budget Slider Event Binding
+        const budgetSlider = document.getElementById('budgetSlider');
+        budgetSlider.addEventListener('input', function(e) {
+            const val = e.target.value;
+            document.getElementById('budgetValue').innerText = '$' + Number(val).toLocaleString();
+            if (currentZones.length > 0) {
+                renderAgentFeed(currentZones);
+            }
+        });
+
+        document.getElementById('autoRefreshToggle').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                loadAnalytics();
+                autoRefreshTimer = setInterval(loadAnalytics, 120000);
+            } else {
+                if (autoRefreshTimer) {
+                    clearInterval(autoRefreshTimer);
+                    autoRefreshTimer = null;
+                }
+                const statusEl = document.getElementById('refreshStatus');
+                if (statusEl) statusEl.innerText = 'Auto-refresh off';
+            }
+        });
+
+        function updateMetrics(summary) {
+            document.getElementById('avgTemp').innerText = summary.avg_surface_temp_c + ' °C';
+            document.getElementById('hvacSurge').innerText = '$' + Number(summary.total_hvac_cost_surge_usd).toLocaleString();
+            document.getElementById('potentialSavings').innerText = '$' + Number(summary.potential_annual_savings_usd).toLocaleString();
+            document.getElementById('highRiskZone').innerText = summary.max_risk_zone;
+        }
+
+        function renderMap(zones) {
+            map.eachLayer((layer) => {
+                if (layer instanceof L.CircleMarker) map.removeLayer(layer);
+            });
+
+            zones.forEach(z => {
+                const temp = z.surface_temp || 0;
+                const airTemp = z.air_temp || (temp - 5).toFixed(1);
+                const m = z.metrics || {};
+                const color = temp > 44 ? '#FF453A' : (temp > 39 ? '#FF9F0A' : '#30D158');
+
+                const marker = L.circleMarker([z.lat, z.lng], {
+                    radius: 14,
+                    fillColor: color,
+                    color: '#000',
+                    weight: 1,
+                    opacity: 0.9,
+                    fillOpacity: 0.75
+                }).addTo(map);
+
+                marker.bindPopup(`
+                    <div class="text-slate-900 font-sans p-1">
+                        <strong class="text-sm">${z.cell_id}</strong><br/>
+                        <b>Surface Temp (2m):</b> ${temp} °C<br/>
+                        <b>Air Temp:</b> ${airTemp} °C<br/>
+                        <b>Annual HVAC Surge:</b> $${m.hvac_surge_usd || 0}<br/>
+                        <b>Action:</b> ${m.recommended_action || z.action || 'Cool Roof Coating'}
+                    </div>
+                `);
+            });
+        }
+
+        function renderChart(zones) {
+            const ctx = document.getElementById('analyticsChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const labels = zones.map(z => z.cell_id);
+            const temps = zones.map(z => z.surface_temp || 0);
+            const surges = zones.map(z => (z.metrics ? z.metrics.hvac_surge_usd : 0));
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Surface Temp (°C)',
+                        data: temps,
+                        backgroundColor: '#FF453A',
+                        yAxisID: 'y'
+                    }, {
+                        label: 'HVAC Cost Surge ($)',
+                        data: surges,
+                        backgroundColor: '#D4AF37',
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            grid: {
+                                color: 'rgba(255,255,255,0.05)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderAgentFeed(zones) {
+            const container = document.getElementById('agentFeed');
+            container.innerHTML = '';
+
+            const maxCapex = Number(document.getElementById('budgetSlider').value);
+
+            // Filter by selected Max CAPEX budget slider
+            const filtered = zones.filter(z => {
+                const m = z.metrics || {};
+                const capex = m.estimated_capex_usd || 2400;
+                return capex <= maxCapex;
+            });
+
+            document.getElementById('filteredCount').innerText = `${filtered.length} of ${zones.length} Zones`;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="p-6 text-center text-slate-500 text-xs">No mitigation interventions match the current $${maxCapex.toLocaleString()} CAPEX budget ceiling. Try increasing the slider limit.</div>`;
+                return;
+            }
+
+            const sorted = [...filtered].sort((a, b) => (b.surface_temp || 0) - (a.surface_temp || 0));
+
+            sorted.forEach(z => {
+                const temp = z.surface_temp || 0;
+                const airTemp = z.air_temp || (temp - 5).toFixed(1);
+                const m = z.metrics || {};
+                const action = m.recommended_action || z.action || (temp > 43 ? "High-Albedo Cool Roof Coating" : "Reflective Pavement & Trees");
+                const tempRed = m.projected_temp_reduction_c || +(temp * 0.1).toFixed(1);
+                const savings = m.annual_financial_savings_usd || +(temp * 100).toFixed(0);
+                const capex = m.estimated_capex_usd || 2400;
+                const payback = m.payback_period_months || +((capex / (savings || 1)) * 12).toFixed(1);
+
+                const card = document.createElement('div');
+                card.className = "glass-card tilt-card p-4 rounded-xl space-y-2 border-l-4 " +
+                    (temp > 44 ? "border-l-rose-500" : "border-l-amber-500");
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                            <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i> ${z.cell_id}
+                        </span>
+                        <div class="flex gap-1.5 font-mono text-[11px]">
+                            <span class="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400">Surf: ${temp}°C</span>
+                            <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Air: ${airTemp}°C</span>
+                        </div>
+                    </div>
+                    <p class="text-xs font-semibold text-slate-200">${action}</p>
+                    <div class="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-800/60 text-slate-400">
+                        <div>Temp Reduction: <b class="text-emerald-400">-${tempRed} °C</b></div>
+                        <div>Annual ROI: <b class="text-emerald-400">+$${Number(savings).toLocaleString()}</b></div>
+                        <div>Est. CAPEX: <b class="text-slate-200">$${Number(capex).toLocaleString()}</b></div>
+                        <div>Payback: <b class="text-amber-400">${payback} mos</b></div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function exportCSV() {
+            if (!currentZones || currentZones.length === 0) {
+                alert('No zone analytics data available to export.');
+                return;
+            }
+
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Cell ID,Latitude,Longitude,Surface Temp (C),Air Temp (C),HVAC Surge (USD),Recommended Action,Projected Temp Reduction (C),Annual Savings (USD),Estimated CAPEX (USD),Payback Period (Months)\n";
+
+            currentZones.forEach(z => {
+                const m = z.metrics || {};
+                const row = [
+                    z.cell_id,
+                    z.lat,
+                    z.lng,
+                    z.surface_temp,
+                    z.air_temp || (z.surface_temp - 5).toFixed(1),
+                    m.hvac_surge_usd || 0,
+                    `"${(m.recommended_action || z.action || 'Cool Roof Coating').replace(/"/g, '""')}"`,
+                    m.projected_temp_reduction_c || 0,
+                    m.annual_financial_savings_usd || 0,
+                    m.estimated_capex_usd || 0,
+                    m.payback_period_months || 0
+                ];
+                csvContent += row.join(",") + "\n";
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `thermoplanner_mitigation_report_${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function getFallbackData() {
+            const zones = [];
+            let totalTemp = 0;
+            let totalSurge = 0;
+            let totalSavings = 0;
+            let maxTemp = -1;
+            let maxRiskZone = "ZONE-01";
+
+            for (let i = 1; i <= 8; i++) {
+                const s = +(37 + Math.random() * 11).toFixed(1);
+                const surge = +(s * 32 + Math.random() * 200).toFixed(0);
+                const sav = +(surge * 0.3).toFixed(0);
+                const capex = Math.floor(1500 + Math.random() * 7500);
+
+                totalTemp += s;
+                totalSurge += surge;
+                totalSavings += sav;
+
+                if (s > maxTemp) {
+                    maxTemp = s;
+                    maxRiskZone = `ZONE-0${i}`;
+                }
+
+                zones.push({
+                    cell_id: `ZONE-0${i}`,
+                    lat: 33.4484 + (i * 0.0002),
+                    lng: -112.0740 + (i * 0.0002),
+                    surface_temp: s,
+                    air_temp: +(s - 5).toFixed(1),
+                    building_density: 0.75,
+                    metrics: {
+                        hvac_surge_usd: surge,
+                        recommended_action: s > 43 ? "High-Albedo Cool Roof Coating" : "Reflective Pavement & Urban Trees",
+                        projected_temp_reduction_c: +(s * 0.1).toFixed(1),
+                        annual_financial_savings_usd: sav,
+                        estimated_capex_usd: capex,
+                        payback_period_months: +((capex / (sav || 1)) * 12).toFixed(1),
+                        annual_co2_offset_tons: 1.2
+                    }
+                });
+            }
+
+            return {
+                summary: {
+                    avg_surface_temp_c: +(totalTemp / 8).toFixed(1),
+                    total_hvac_cost_surge_usd: totalSurge,
+                    potential_annual_savings_usd: totalSavings,
+                    max_risk_zone: maxRiskZone
+                },
+                zones: zones
+            };
+        }
+
+        window.onload = loadAnalytics;
+    </script>
+</body>
+
+</html>

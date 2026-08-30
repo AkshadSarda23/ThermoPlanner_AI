@@ -1,0 +1,8 @@
+# Ignore virtual environment folders
+.venv/
+venv/
+env/
+ENV/
+
+# Ignore a specific requirements file (if desired)
+requirements.txt
