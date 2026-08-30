@@ -42,6 +42,11 @@
             transform: translateY(-4px) rotateX(2deg) rotateY(-1deg);
             box-shadow: 0 25px 50px -12px rgba(212, 175, 55, 0.15);
         }
+        /* Dark theme filter for OpenStreetMap tiles */
+        
+        .leaflet-tile-pane {
+            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3);
+        }
     </style>
 </head>
 
@@ -158,11 +163,10 @@
 
     <script>
         let map = L.map('map').setView([33.4484, -112.0740], 16);
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 16,
-            attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
-
         let chartInstance = null;
         let autoRefreshTimer = null;
         let currentZones = [];
