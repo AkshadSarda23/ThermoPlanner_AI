@@ -174,7 +174,8 @@
             try {
                 let res;
                 try {
-                    const response = await fetch(`http://localhost:8000/api/v1/analytics?lat=33.4484&lon=-112.0740&_t=${Date.now()}`);
+                    // Relative path for single-domain routing on Vercel
+                    const response = await fetch(`/api/v1/analytics?lat=33.4484&lon=-112.0740&_t=${Date.now()}`);
                     if (!response.ok) throw new Error('API unreachable');
                     res = await response.json();
                 } catch (e) {
