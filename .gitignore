@@ -3,6 +3,3 @@
 venv/
 env/
 ENV/
-
-# Ignore a specific requirements file (if desired)
-requirements.txt
